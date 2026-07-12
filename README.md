@@ -93,6 +93,27 @@ R2_PUBLIC_BASE = https://<your public bucket/CDN base>
 Owner uploads land under `questions/`, respondent uploads under `answers/`; keys
 are randomised so callers can't overwrite one another.
 
+## AI analysis of your results (your own Gemini key)
+
+Analyse a survey's results with **your own** Google Gemini key — the responses
+are aggregated into per-question distributions **on the silo**, and the key is a
+silo secret, so neither your raw data nor your key ever reaches Tinaney. Deploy
+the function (Verify JWT = **ON** — owner only):
+
+```bash
+supabase functions deploy analyze-survey
+```
+Secrets:
+```
+GEMINI_API_KEY = <your Google Gemini API key>   # https://aistudio.google.com/apikey
+# optional: GEMINI_MODEL (default gemini-2.5-flash)
+# (SILO_JWT_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY already set)
+```
+The owner triggers it from **My Silos → Analyze surveys** in Tinaney. It reads
+only *completed* responses, tallies choice distributions / numeric stats / text
+samples locally, and returns a grounded summary, key findings, patterns and
+recommendations. No raw response ever leaves your Supabase.
+
 ## Publishing to the Tinaney Hub catalog
 
 When a survey becomes `active` with `publish_to_hub = true`, Survey Studio calls
@@ -130,6 +151,8 @@ This is the point of BYOI:
 - **respondent_uid is forced server-side** by `set_response_defaults()`, so a
   client can never submit as someone else or start a response on a closed
   survey, or exceed your response quota.
+- **AI analysis stays yours.** `analyze-survey` runs on the silo with your own
+  Gemini key over aggregated distributions — no raw response and no key leave.
 
 ## Repository layout
 
@@ -139,6 +162,7 @@ This is the point of BYOI:
 | `supabase/functions/authenticate-hub-user/` | Redeem a Hub ticket → mint this silo's short-lived JWT (Verify JWT = OFF) |
 | `supabase/functions/sync-to-hub/` | Project a published survey to the Tinaney Hub catalog / retract it (owner only) |
 | `supabase/functions/sign-upload/` | Presign an R2 upload for question/answer images |
+| `supabase/functions/analyze-survey/` | Aggregate results on the silo + AI insights via your own Gemini key (owner only) |
 
 ## Publishing this template
 
