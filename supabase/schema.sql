@@ -34,13 +34,18 @@ CREATE TABLE IF NOT EXISTS public.surveys (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Questions. `config` holds type-specific settings: options[], min/max, scale
--- points, required, media_url (a question image hosted on your own R2), etc.
+-- Questions. Types + `config` mirror Tinaney's survey builder, so a survey built
+-- in Tinaney drops straight onto a silo:
+--   question_type : 'TEXT' | 'MULTIPLE_CHOICE' (single) | 'CHECKBOX' (multi)
+--                 | 'RATING' | 'DATE' | 'MATRIX' | 'GEO_LOCATION' | 'IMAGE_UPLOAD' | 'RANKING'
+--   config        : { options: [{ id, label: { en, kh } }], required, min, max, step,
+--                     rows/columns (MATRIX), labels, media_url (image on your own R2) }
+-- question_type is free text (no CHECK) so new builder types keep working here.
 CREATE TABLE IF NOT EXISTS public.survey_questions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   survey_id uuid NOT NULL REFERENCES public.surveys(id) ON DELETE CASCADE,
   order_index integer NOT NULL DEFAULT 0,
-  question_type text NOT NULL,   -- 'single_choice' | 'multi_choice' | 'text' | 'number' | 'scale' | 'image'
+  question_type text NOT NULL,   -- see the type list above (Tinaney builder types)
   question_text jsonb NOT NULL DEFAULT '{}'::jsonb,
   config jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
