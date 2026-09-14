@@ -1,0 +1,166 @@
+name: Deploy Silo
+
+# Deploy your sovereign survey Silo to YOUR Supabase project, straight from your
+# fork — Tinaney never touches it. Fork this repo, add the secrets below, then
+# run this workflow (Actions tab → Deploy Silo → Run workflow), or just push to
+# `main` and it deploys itself.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_ACCESS_TOKEN   personal access token (supabase.com/dashboard/account/tokens)
+#   SUPABASE_PROJECT_REF    your project ref (Project Settings → General)
+#   SUPABASE_DB_URL         Postgres connection string (Connect → Session pooler),
+#                           used only to apply supabase/schema.sql
+#
+# Required function secrets (set on the silo by this workflow):
+#   HUB_URL, HUB_ANON_KEY, SILO_JWT_SECRET
+#
+# Optional function secrets (leave unset to skip that feature):
+#   Hub catalog sync : HUB_INGEST_URL, SILO_ID, SILO_PUBLISH_SECRET
+#   R2 media uploads : R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID,
+#                      R2_SECRET_ACCESS_KEY, R2_PUBLIC_BASE
+#   AI analysis      : GEMINI_API_KEY, GEMINI_MODEL
+#
+# Note: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected into Edge
+# Functions by Supabase itself — do NOT add them as function secrets (the CLI
+# rejects the reserved `SUPABASE_` prefix).
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_schema:
+        description: "Apply supabase/schema.sql (idempotent — safe to re-run)"
+        type: boolean
+        default: true
+      deploy_functions:
+        description: "Deploy the Edge Functions"
+        type: boolean
+        default: true
+      sync_secrets:
+        description: "Push the configured function secrets to the silo"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - ".github/workflows/deploy-silo.yml"
+
+concurrency:
+  group: deploy-silo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy credentials
+        id: gate
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ] || [ -z "${PROJECT_REF:-}" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::error::Missing secret SUPABASE_ACCESS_TOKEN and/or SUPABASE_PROJECT_REF"
+              exit 1
+            fi
+            echo "::notice::Silo deploy secrets are not configured — skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Supabase CLI
+        if: steps.gate.outputs.ready == 'true'
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Apply schema
+        if: steps.gate.outputs.ready == 'true' && inputs.apply_schema != false
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DB_URL:-}" ]; then
+            echo "::warning::SUPABASE_DB_URL is not set — skipping schema.sql. Run it by hand in the SQL editor."
+            exit 0
+          fi
+          echo "Applying supabase/schema.sql to $PROJECT_REF"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/schema.sql
+
+      - name: Sync function secrets
+        if: steps.gate.outputs.ready == 'true' && inputs.sync_secrets != false
+        env:
+          HUB_URL: ${{ secrets.HUB_URL }}
+          HUB_ANON_KEY: ${{ secrets.HUB_ANON_KEY }}
+          SILO_JWT_SECRET: ${{ secrets.SILO_JWT_SECRET }}
+          HUB_INGEST_URL: ${{ secrets.HUB_INGEST_URL }}
+          SILO_ID: ${{ secrets.SILO_ID }}
+          SILO_PUBLISH_SECRET: ${{ secrets.SILO_PUBLISH_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+        run: |
+          set -euo pipefail
+          for required in HUB_URL HUB_ANON_KEY SILO_JWT_SECRET; do
+            if [ -z "${!required:-}" ]; then
+              echo "::error::Missing required function secret $required"
+              exit 1
+            fi
+          done
+
+          # Only push the secrets that are actually configured, so optional
+          # features stay off instead of being set to an empty string.
+          args=()
+          for name in HUB_URL HUB_ANON_KEY SILO_JWT_SECRET \
+                      HUB_INGEST_URL SILO_ID SILO_PUBLISH_SECRET \
+                      R2_ACCOUNT_ID R2_BUCKET R2_ACCESS_KEY_ID \
+                      R2_SECRET_ACCESS_KEY R2_PUBLIC_BASE \
+                      GEMINI_API_KEY GEMINI_MODEL; do
+            value="${!name:-}"
+            if [ -n "$value" ]; then
+              args+=("$name=$value")
+              echo "  will set $name"
+            fi
+          done
+
+          supabase secrets set --project-ref "$PROJECT_REF" "${args[@]}"
+
+      - name: Deploy Edge Functions
+        if: steps.gate.outputs.ready == 'true' && inputs.deploy_functions != false
+        run: |
+          set -euo pipefail
+          # verify_jwt per function comes from supabase/config.toml:
+          # authenticate-hub-user is OFF (the Hub ticket is the credential),
+          # every other function is ON (owner-only).
+          for dir in supabase/functions/*/; do
+            fn="$(basename "$dir")"
+            echo "::group::deploy $fn"
+            supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
+            echo "::endgroup::"
+          done
+
+      - name: Summary
+        if: always() && steps.gate.outputs.ready == 'true'
+        run: |
+          {
+            echo "### Tinaney Silo deploy"
+            echo ""
+            echo "- **Project:** \`${PROJECT_REF}\`"
+            echo "- **Source:** \`${{ github.repository }}@${{ github.ref_name }}\`"
+            echo ""
+            echo "Deployed functions:"
+            for dir in supabase/functions/*/; do echo "- \`$(basename "$dir")\`"; done
+            echo ""
+            echo "If this is a new silo, finish the one-time steps:"
+            echo "1. Call \`register_silo(...)\` on the Tinaney Hub to get your \`publish_secret\`."
+            echo "2. Add \`SILO_ID\` + \`SILO_PUBLISH_SECRET\` (and \`HUB_INGEST_URL\`) as repo secrets, then re-run."
+          } >> "$GITHUB_STEP_SUMMARY"
