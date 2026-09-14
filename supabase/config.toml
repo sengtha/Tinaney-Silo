@@ -1,0 +1,22 @@
+# Tinaney-Silo project config.
+#
+# The only thing that matters for deployment is `verify_jwt` per function:
+# `supabase functions deploy` reads it from here, so the GitHub Actions workflow
+# never has to remember which function is public.
+
+project_id = "tinaney-silo"
+
+[functions.authenticate-hub-user]
+# OFF on purpose: the one-time Hub ticket IS the credential. A caller arriving
+# here has no Supabase JWT yet — this function is what mints one.
+verify_jwt = false
+
+[functions.sync-to-hub]
+# Owner only — the function checks app_metadata.silo_role itself as well.
+verify_jwt = true
+
+[functions.sign-upload]
+verify_jwt = true
+
+[functions.analyze-survey]
+verify_jwt = true

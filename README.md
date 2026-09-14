@@ -40,6 +40,34 @@ Tinaney Hub                    Tinaney client (browser)         Your silo (this 
   `auth.uid()` with no shadow-user provisioning.
 - `app_metadata.silo_role` is `owner` (you, the researcher) or `respondent`.
 
+## ⚡ Quick deploy from GitHub
+
+Stand the whole silo up on **your own** Supabase project — schema, RLS, Edge
+Functions and their secrets — straight from a fork of this repo, with no manual
+dashboard clicking:
+
+1. **Fork** this repository.
+2. Add three repo secrets (**Settings → Secrets and variables → Actions**):
+   `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`, `SUPABASE_DB_URL` — plus the
+   silo's own `HUB_URL`, `HUB_ANON_KEY` and `SILO_JWT_SECRET`.
+3. **Actions → Deploy Silo → Run workflow.**
+
+It applies `supabase/schema.sql`, pushes your function secrets, and deploys every
+function with the right `verify_jwt` setting. Pushing to `main` redeploys
+automatically whenever anything under `supabase/` changes.
+
+Optional features turn themselves on when you add their secrets — R2 uploads
+(`R2_*`), AI analysis (`GEMINI_API_KEY`), Hub catalog publishing
+(`SILO_ID`, `SILO_PUBLISH_SECRET`, `HUB_INGEST_URL`).
+
+Full walkthrough: **[docs/Deploy-from-GitHub.md](docs/Deploy-from-GitHub.md)**.
+
+> Your silo is a sovereign environment: it runs on a Supabase project you own,
+> with keys you hold and can revoke. Tinaney never reaches into it — the Hub is
+> only a discovery endpoint your silo talks *out* to.
+
+The manual, step-by-step setup below is still available if you prefer full control.
+
 ## Setup
 
 1. Create a Supabase project (this becomes your silo).
@@ -163,6 +191,9 @@ This is the point of BYOI:
 | `supabase/functions/sync-to-hub/` | Project a published survey to the Tinaney Hub catalog / retract it (owner only) |
 | `supabase/functions/sign-upload/` | Presign an R2 upload for question/answer images |
 | `supabase/functions/analyze-survey/` | Aggregate results on the silo + AI insights via your own Gemini key (owner only) |
+| `supabase/config.toml` | Per-function `verify_jwt` settings used by `supabase functions deploy` |
+| `.github/workflows/deploy-silo.yml` | One-click / on-push deploy of the whole silo to your own Supabase project |
+| `docs/Deploy-from-GitHub.md` | Fork → secrets → *Run workflow* walkthrough |
 
 ## Publishing this template
 
